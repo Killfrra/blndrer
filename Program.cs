@@ -4,17 +4,30 @@ using Newtonsoft.Json;
 using System.Collections.Specialized;
 using static HashFunctions;
 
-BlendFile file;
-using (var fs = new FileStream("Jinx.blnd", FileMode.Open, FileAccess.Read))
-using (var br = new BinaryReader(fs, Encoding.Default))
-    file = new BlendFile(br);
 
-//File.WriteAllText("Jinx.blnd.json", JsonConvert.SerializeObject(file, Formatting.Indented));
+BlendFile ReadBLND(string path)
+{
+    using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read))
+    using (var br = new BinaryReader(fs, Encoding.Default))
+        return new BlendFile(br);
+}
+void WriteJSON(BlendFile file, string path)
+{
+    File.WriteAllText(path, JsonConvert.SerializeObject(file, Formatting.Indented));
+}
+void WriteBLND(BlendFile file, string path)
+{
+    Memory.Allocate(0, file);
+    using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write))
+    using (var bw = new BinaryWriter(fs, Encoding.Default))
+        Memory.Write(bw);
+}
 
-Memory.Allocate(file);
-using (var fs = new FileStream("Jinx.2.blnd", FileMode.Create, FileAccess.Write))
-using (var bw = new BinaryWriter(fs, Encoding.Default))
-    Memory.Write(bw);
+var f1 = ReadBLND("Jinx.blnd");
+//WriteJSON(f1, "Jinx.blnd.json");
+WriteBLND(f1, "Jinx.2.blnd");
+var f2 = ReadBLND("Jinx.2.blnd");
+WriteJSON(f2, "Jinx.2.blnd.json");
 
 static class Memory
 {
@@ -35,8 +48,10 @@ static class Memory
             Write = write;
         }
     }
-    public static void Write(BinaryWriter bw, Writable wobj)
+    public static void Write(BinaryWriter bw, Writable? wobj)
     {
+        if(wobj == null) return;
+
         var record = memory.GetValueOrDefault(wobj);
         if(Mode == MemoryMode.SizeEstimation)
         {
@@ -50,18 +65,44 @@ static class Memory
         {
             if(record == null)
                 throw new Exception("The object must be allocated at the previous stage");
+            wobj.Write(bw); // ctr(bw)
         }
     }
-    public static int Allocate(Writable wobj)
+    public static int Allocate(int offset, Writable? wobj)
     {
-        return Allocate(wobj, wobj.Write);
+        if(wobj == null) return 0;
+        return Allocate(offset, wobj, wobj.Write);
     }
-    public static int Allocate(string sobj)
+    public static int Allocate(int offset, string? sobj)
     {
-        return Allocate(sobj, bw => bw.Write(Encoding.UTF8.GetBytes(sobj)));
+        if(sobj == null) return 0;
+        return Allocate(offset, sobj, bw => bw.WriteCString(sobj));
     }
-    public static int Allocate(object obj, Action<BinaryWriter> ctr, BinaryWriter? bwo = null)
+    public static int AllocateArray(int offset, Writable?[]? array)
     {
+        if(array == null) return 0;
+        return Allocate(offset, array, bw =>
+        {
+            foreach(var item in array)
+                bw.Write(item);
+        });
+    }
+    public static int AllocateArray2(int offset, Writable?[]? array, int? baseAddr = null)
+    {
+        if(array == null) return 0;
+        return Allocate(offset, array, bw =>
+        {
+            int addr = baseAddr ?? (int)bw.BaseStream.Position;
+            bw.Write
+            (
+                array.Select(item => Allocate(addr, item))
+                     .SelectMany(BitConverter.GetBytes).ToArray()
+            );
+        });
+    }
+    public static int Allocate(int offset, object? obj, Action<BinaryWriter> ctr)
+    {
+        if(obj == null) return 0;
         var record = memory.GetValueOrDefault(obj);
         if(Mode == MemoryMode.SizeEstimation)
         {
@@ -72,9 +113,10 @@ static class Memory
                 record = new(ctr);
                 memory.Add(obj, record);
                 ctr(bw);
-                Debug.Assert(ms.Length != 0);
+                //Debug.Assert(ms.Length != 0);
                 record.Size = ms.Length;
             }
+            record.Allocate = true;
             return 0;
         }
         else //if(Mode == MemoryMode.Writing)
@@ -82,9 +124,8 @@ static class Memory
             if(record == null)
                 throw new Exception("The object must be allocated at the previous stage");
         }
-        record.Allocate = true;
         //Debug.Assert(record.Addr != -1);
-        return (int)record.Addr;
+        return (int)record.Addr - offset;
     }
     public static uint SizeOf(object obj)
     {
@@ -102,7 +143,6 @@ static class Memory
     {
         long addr = 0;
         foreach(var record in memory.Values)
-        //if(record.Addr == -1)
         if(record.Allocate)
         {
             record.Addr = addr;
@@ -110,7 +150,10 @@ static class Memory
         }
         Mode = MemoryMode.Writing;
         foreach(var record in memory.Values)
+        if(record.Allocate)
+        {
             record.Write(bw);
+        }
         Mode = MemoryMode.SizeEstimation;
     }
 }
@@ -205,18 +248,34 @@ static class BinaryReaderExtensions
     public static string ReadCString(this BinaryReader br, int length = int.MaxValue)
     {
         var ret = "";
+        var prevPosition = br.BaseStream.Position;
         for(int i = 0; i < length; i++)
         {
             var c = br.ReadChar();
             if(c == '\0') break;
             ret += c;
         }
+        if(length != int.MaxValue)
+            br.BaseStream.Position = prevPosition + length;
         return ret;
     }
 
-    public static void Write(this BinaryWriter bw, Writable wobj)
+    public static void Write(this BinaryWriter bw, Writable? wobj)
     {
         Memory.Write(bw, wobj);
+    }
+
+    public static void WriteCString(this BinaryWriter bw, string sobj)
+    {
+        bw.Write(Encoding.UTF8.GetBytes(sobj + '\0'));
+    }
+
+    public static void WriteCString(this BinaryWriter bw, string sobj, int length)
+    {
+        length--;
+        sobj = sobj.PadRight(length, '\0')[..length];
+        var bytes = Encoding.UTF8.GetBytes(sobj + '\0');
+        bw.Write(bytes);
     }
 }
 
@@ -274,10 +333,10 @@ class PoolData : Resource
     public ClipResource[] mClassAry;
     public MaskResource[] mMaskDataAry;
     public EventResource[] mEventDataAry;
-    public AnimResourceBase[] mAnimDataAry;
-    public uint mAnimNameCount;
+    public AnimResourceBase?[] mAnimDataAry;
     public PathRecord[] mAnimNames;
     public PathRecord mSkeleton;
+
     private uint[] mExtBuffer;
 
     public PoolData(BinaryReader br): base(br)
@@ -301,8 +360,9 @@ class PoolData : Resource
         long mMaskDataAryAddr = br.ReadAddr();
         long mEventDataAryAddr = br.ReadAddr();
         long mAnimDataAryAddr = br.ReadAddr();
-        mAnimNameCount = br.ReadUInt32();
+        uint mAnimNameCount = br.ReadUInt32();
         long mAnimNamesOffset = br.ReadAddr();
+
         mSkeleton = new PathRecord(br);
         mExtBuffer = new uint[]
         {
@@ -324,28 +384,47 @@ class PoolData : Resource
 
     public override void Write(BinaryWriter bw)
     {
+        int baseAddr = (int)bw.BaseStream.Position;
+
         bw.Write(Memory.SizeOf(this));
         bw.Write(mFormatToken);
         bw.Write(mVersion);
-        bw.Write(0u); // mNumClasses
-        bw.Write(0u); // mNumBlends
-        bw.Write(0u); // mNumTransitionData
-        bw.Write(0u); // mNumTracks
-        bw.Write(0u); // mNumAnimData
-        bw.Write(0u); // mNumMaskData
-        bw.Write(0u); // mNumEventData
+        bw.Write(mClassAry.Length);
+        bw.Write(mBlendDataAry.Length);
+        bw.Write(mTransitionData.Length);
+        bw.Write(mBlendTrackAry.Length);
+        bw.Write(mAnimDataAry.Length);
+        bw.Write(mMaskDataAry.Length);
+        bw.Write(mEventDataAry.Length);
         bw.Write(Convert.ToUInt32(mUseCascadeBlend));
         bw.Write(mCascadeBlendValue);
-        bw.Write(0); // mBlendDataAryAddr
-        bw.Write(0); // mTransitionDataOffset
-        bw.Write(0); // mBlendTrackAryAddr
-        bw.Write(0); // mClassAryAddr
-        bw.Write(0); // mMaskDataAryAddr
-        bw.Write(0); // mEventDataAryAddr
-        bw.Write(0); // mAnimDataAryAddr
-        bw.Write(0u); // mAnimNameCount
-        bw.Write(0); // mAnimNamesOffset
+
+        int c() => (int)bw.BaseStream.Position; // - baseAddr;
+
+        int mBlendDataAryAddr;
+        int mTransitionDataOffset;
+        int mBlendTrackAryAddr;
+        int mClassAryAddr;
+        int mMaskDataAryAddr;
+        int mEventDataAryAddr;
+        int mAnimDataAryAddr;
+        int mAnimNameCount;
+        int mAnimNamesOffset;
+
+        bw.Write(mBlendDataAryAddr = Memory.AllocateArray(c(), mBlendDataAry));
+        bw.Write(mTransitionDataOffset = Memory.AllocateArray(c(), mTransitionData));
+        bw.Write(mBlendTrackAryAddr = Memory.AllocateArray(c(), mBlendTrackAry));
+
+        bw.Write(mClassAryAddr = Memory.AllocateArray2(c(), mClassAry));
+        bw.Write(mMaskDataAryAddr = Memory.AllocateArray2(c(), mMaskDataAry));
+        bw.Write(mEventDataAryAddr = Memory.AllocateArray2(c(), mEventDataAry));
+        bw.Write(mAnimDataAryAddr = Memory.AllocateArray2(c(), mAnimDataAry));
+
+        bw.Write(mAnimNameCount = mAnimNames.Length);
+        bw.Write(mAnimNamesOffset = Memory.AllocateArray(c(), mAnimNames));
+        
         bw.Write(mSkeleton);
+        
         foreach(uint ui in mExtBuffer)
             bw.Write(ui);
     }
@@ -359,6 +438,11 @@ class AnimResourceBase : Resource
         formatToken = br.ReadUInt32();
         ReadExtraBytes();
     }
+    public override void Write(BinaryWriter bw)
+    {
+        bw.Write(Memory.SizeOf(this));
+        bw.Write(formatToken);
+    }
 };
 
 class EventResource: Resource
@@ -366,7 +450,6 @@ class EventResource: Resource
     public uint mFormatToken;
     public uint mVersion;
     public ushort mFlags;
-    public ushort mNumEvents;
     public uint mUniqueID;
     public BaseEventData[] mEventArray;
     public BaseEventData mEventData;
@@ -380,6 +463,11 @@ class EventResource: Resource
             mDataID = br.ReadUInt32();
             mNameHash = br.ReadUInt32();
         }
+        public override void Write(BinaryWriter bw)
+        {
+            bw.Write(mDataID);
+            bw.Write(mNameHash);
+        }
     }
     public EventFrame mEventFrame;
     public class EventFrame : Writable
@@ -391,6 +479,11 @@ class EventResource: Resource
             mDataID = br.ReadUInt32();
             mFrame = br.ReadSingle();
         }
+        public override void Write(BinaryWriter bw)
+        {
+            bw.Write(mDataID);
+            bw.Write(mFrame);
+        }
     }
     public string mName;
     private uint[] mExtBuffer;
@@ -399,13 +492,25 @@ class EventResource: Resource
         mFormatToken = br.ReadUInt32();
         mVersion = br.ReadUInt32();
         mFlags = br.ReadUInt16();
-        mNumEvents = br.ReadUInt16();
+        ushort mNumEvents = br.ReadUInt16();
         mUniqueID = br.ReadUInt32();
         long mEventOffsetArrayOffset = br.ReadAddr(baseAddr);
         long mEventDataOffset = br.ReadAddr(baseAddr);
         long mEventNameHashOffset = br.ReadAddr(baseAddr);
         long mEventFrameOffset = br.ReadAddr(baseAddr);
         long mNameOffset = br.ReadAddr(baseAddr);
+
+        var test = new int[]
+        {
+            (int)mEventOffsetArrayOffset - (int)baseAddr,
+            (int)mEventDataOffset - (int)baseAddr,
+            (int)mEventNameHashOffset - (int)baseAddr,
+            (int)mEventFrameOffset - (int)baseAddr,
+            (int)mNameOffset - (int)baseAddr,
+        };
+
+        Console.WriteLine($"READ : {string.Join(',', test)}");
+
         mExtBuffer = new uint[]
         {
             br.ReadUInt32(),
@@ -425,6 +530,47 @@ class EventResource: Resource
         mName = br.ReadCString();
         br.BaseStream.Position = prevPosition;
     }
+    public override void Write(BinaryWriter bw)
+    {
+        if(Memory.SizeOf(this) != 0)
+        {
+            Console.WriteLine();
+        }
+
+        int baseAddr = (int)bw.BaseStream.Position;
+        bw.Write(Memory.SizeOf(this));
+        bw.Write(mFormatToken);
+        bw.Write(mVersion);
+        bw.Write((ushort)mFlags);
+        bw.Write((ushort)mEventArray.Length);
+        bw.Write(mUniqueID);
+
+        int mEventOffsetArrayOffset;
+        int mEventDataOffset;
+        int mEventNameHashOffset;
+        int mEventFrameOffset;
+        int mNameOffset;
+
+        bw.Write(mEventOffsetArrayOffset = Memory.AllocateArray2(baseAddr, mEventArray, baseAddr));
+        bw.Write(mEventDataOffset = Memory.Allocate(baseAddr, mEventData));
+        bw.Write(mEventNameHashOffset = Memory.Allocate(baseAddr, mEventNameHash));
+        bw.Write(mEventFrameOffset = Memory.Allocate(baseAddr, mEventFrame));
+        bw.Write(mNameOffset = Memory.Allocate(baseAddr, mName));
+
+        var test = new int[]
+        {
+            (int)mEventOffsetArrayOffset,
+            (int)mEventDataOffset,
+            (int)mEventNameHashOffset,
+            (int)mEventFrameOffset,
+            (int)mNameOffset,
+        };
+
+        Console.WriteLine($"WRITE: {string.Join(',', test)}");
+
+        foreach(uint ui in mExtBuffer)
+            bw.Write(ui);
+    }
 }
 
 class BaseEventData : Resource
@@ -438,13 +584,22 @@ class BaseEventData : Resource
         mEventTypeId = br.ReadUInt32();
         mFlags = br.ReadUInt32();
         mFrame = br.ReadSingle();
-        int mNameOffset = br.ReadInt32();
+        long mNameOffset = br.ReadAddr(baseAddr);
         ReadExtraBytes();
 
         long prevPosition = br.BaseStream.Position;
-        br.BaseStream.Position = baseAddr + mNameOffset;
+        br.BaseStream.Position = mNameOffset;
         mName = br.ReadCString();
         br.BaseStream.Position = prevPosition;
+    }
+    public override void Write(BinaryWriter bw)
+    {
+        int baseAddr = (int)bw.BaseStream.Position;
+        bw.Write(Memory.SizeOf(this));
+        bw.Write(mEventTypeId);
+        bw.Write(mFlags);
+        bw.Write(mFrame);
+        bw.Write(Memory.Allocate(baseAddr, mName));
     }
 }
 
@@ -464,9 +619,9 @@ class PathRecord : Writable
 
     public override void Write(BinaryWriter bw)
     {
-        long baseAddr = bw.BaseStream.Position;
+        int c() => (int)bw.BaseStream.Position;
         bw.Write(HashStringFNV1a(path));
-        bw.Write((int)(Memory.Allocate(path) - baseAddr));
+        bw.Write(Memory.Allocate(c(), path));
     }
 }
 
@@ -488,6 +643,11 @@ class MaskResource : Resource
             mWeightID = br.ReadInt32();
             mJointHash = br.ReadUInt32();
         }
+        public override void Write(BinaryWriter bw)
+        {
+            bw.Write(mWeightID);
+            bw.Write(mJointHash);
+        }
     }
     public JointNdx mJointNdx;
     public class JointNdx : Writable
@@ -498,6 +658,11 @@ class MaskResource : Resource
         {
             mWeightID = br.ReadInt32();
             mJointNdx = br.ReadInt32();
+        }
+        public override void Write(BinaryWriter bw)
+        {
+            bw.Write(mWeightID);
+            bw.Write(mJointNdx);
         }
     }
     public string mName;
@@ -528,6 +693,23 @@ class MaskResource : Resource
         br.BaseStream.Position = mJointNdxOffset;
         mJointNdx = new JointNdx(br);
         br.BaseStream.Position = prevPosition;
+    }
+
+    public override void Write(BinaryWriter bw)
+    {
+        int baseAddr = (int)bw.BaseStream.Position;
+        bw.Write(Memory.SizeOf(this));
+        bw.Write(mFormatToken);
+        bw.Write(mVersion);
+        bw.Write(mFlags);
+        bw.Write(mNumElement);
+        bw.Write(mUniqueID);
+        bw.Write(Memory.Allocate(baseAddr, mWeight, bw => bw.Write(mWeight)));
+        bw.Write(Memory.Allocate(baseAddr, mJointHash));
+        bw.Write(Memory.Allocate(baseAddr, mJointNdx));
+        bw.WriteCString(mName, 32);
+        foreach(uint ui in mExtBuffer)
+            bw.Write(ui);
     }
 };
 
@@ -560,6 +742,16 @@ class ClipResource: Resource
         mClipData = new ClipData(br);
         br.BaseStream.Position = prevPosition;
     }
+
+    public override void Write(BinaryWriter bw)
+    {
+        int baseAddr = (int)bw.BaseStream.Position;
+        bw.Write(Memory.SizeOf(this));
+        bw.Write((uint)mFlags);
+        bw.Write(mUniqueID);
+        bw.Write(Memory.Allocate(baseAddr, mName));
+        bw.Write(Memory.Allocate(baseAddr, mClipData));
+    }
 }
 
 class ClipData : Writable
@@ -568,6 +760,10 @@ class ClipData : Writable
     public ClipData(BinaryReader br)
     {
         mClipTypeID = br.ReadUInt32();
+    }
+    public override void Write(BinaryWriter bw)
+    {
+        bw.Write(mClipTypeID);
     }
 }
 
@@ -583,6 +779,13 @@ class BlendData : Writable
         mToAnimId = br.ReadUInt32();
         mBlendFlags = br.ReadUInt32();
         mBlendTime = br.ReadSingle();
+    }
+    public override void Write(BinaryWriter bw)
+    {
+        bw.Write(mFromAnimId);
+        bw.Write(mToAnimId);
+        bw.Write(mBlendFlags);
+        bw.Write(mBlendTime);
     }
 };
 
@@ -636,5 +839,13 @@ class TrackResource: Resource
         mIndex = br.ReadUInt32();
         mName = br.ReadCString(32);
         ReadExtraBytes();
+    }
+    public override void Write(BinaryWriter bw)
+    {
+        bw.Write(Memory.SizeOf(this));
+        bw.Write(mBlendWeight);
+        bw.Write(mBlendMode);
+        bw.Write(mIndex);
+        bw.WriteCString(mName, 32);
     }
 }
