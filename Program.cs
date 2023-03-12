@@ -87,12 +87,12 @@ static class Memory
                 bw.Write(item);
         });
     }
-    public static int AllocateArray2(int offset, Writable?[]? array, int? baseAddr = null)
+    public static int AllocateArray2(int offset, Writable?[]? array, /*HACK*/int? baseAddrOffset = null)
     {
         if(array == null) return 0;
         return Allocate(offset, array, bw =>
         {
-            int addr = baseAddr ?? (int)bw.BaseStream.Position;
+            int addr = (int)bw.BaseStream.Position - (baseAddrOffset ?? 0);
             bw.Write
             (
                 array.Select(item => Allocate(addr, item))
@@ -399,8 +399,6 @@ class PoolData : Resource
         bw.Write(Convert.ToUInt32(mUseCascadeBlend));
         bw.Write(mCascadeBlendValue);
 
-        int c() => (int)bw.BaseStream.Position; // - baseAddr;
-
         int mBlendDataAryAddr;
         int mTransitionDataOffset;
         int mBlendTrackAryAddr;
@@ -411,6 +409,7 @@ class PoolData : Resource
         int mAnimNameCount;
         int mAnimNamesOffset;
 
+        int c() => (int)bw.BaseStream.Position;
         bw.Write(mBlendDataAryAddr = Memory.AllocateArray(c(), mBlendDataAry));
         bw.Write(mTransitionDataOffset = Memory.AllocateArray(c(), mTransitionData));
         bw.Write(mBlendTrackAryAddr = Memory.AllocateArray(c(), mBlendTrackAry));
@@ -500,17 +499,6 @@ class EventResource: Resource
         long mEventFrameOffset = br.ReadAddr(baseAddr);
         long mNameOffset = br.ReadAddr(baseAddr);
 
-        var test = new int[]
-        {
-            (int)mEventOffsetArrayOffset - (int)baseAddr,
-            (int)mEventDataOffset - (int)baseAddr,
-            (int)mEventNameHashOffset - (int)baseAddr,
-            (int)mEventFrameOffset - (int)baseAddr,
-            (int)mNameOffset - (int)baseAddr,
-        };
-
-        Console.WriteLine($"READ : {string.Join(',', test)}");
-
         mExtBuffer = new uint[]
         {
             br.ReadUInt32(),
@@ -532,11 +520,6 @@ class EventResource: Resource
     }
     public override void Write(BinaryWriter bw)
     {
-        if(Memory.SizeOf(this) != 0)
-        {
-            Console.WriteLine();
-        }
-
         int baseAddr = (int)bw.BaseStream.Position;
         bw.Write(Memory.SizeOf(this));
         bw.Write(mFormatToken);
@@ -551,22 +534,12 @@ class EventResource: Resource
         int mEventFrameOffset;
         int mNameOffset;
 
-        bw.Write(mEventOffsetArrayOffset = Memory.AllocateArray2(baseAddr, mEventArray, baseAddr));
+        int c() => (int)bw.BaseStream.Position;
+        bw.Write(mEventOffsetArrayOffset = Memory.AllocateArray2(baseAddr, mEventArray, c() - baseAddr));
         bw.Write(mEventDataOffset = Memory.Allocate(baseAddr, mEventData));
         bw.Write(mEventNameHashOffset = Memory.Allocate(baseAddr, mEventNameHash));
         bw.Write(mEventFrameOffset = Memory.Allocate(baseAddr, mEventFrame));
         bw.Write(mNameOffset = Memory.Allocate(baseAddr, mName));
-
-        var test = new int[]
-        {
-            (int)mEventOffsetArrayOffset,
-            (int)mEventDataOffset,
-            (int)mEventNameHashOffset,
-            (int)mEventFrameOffset,
-            (int)mNameOffset,
-        };
-
-        Console.WriteLine($"WRITE: {string.Join(',', test)}");
 
         foreach(uint ui in mExtBuffer)
             bw.Write(ui);
