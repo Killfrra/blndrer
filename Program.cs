@@ -17,10 +17,7 @@ void WriteJSON(BlendFile file, string path)
 }
 void WriteBLND(BlendFile file, string path)
 {
-    Memory.Allocate(0, file);
-    using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write))
-    using (var bw = new BinaryWriter(fs, Encoding.Default))
-        Memory.Write(bw);
+    File.WriteAllBytes(path, Memory.Process(bw => file.Write(bw)));
 }
 
 var f1 = ReadBLND("Jinx.blnd");
@@ -55,17 +52,22 @@ static class Memory
         var record = memory.GetValueOrDefault(wobj);
         if(Mode == MemoryMode.SizeEstimation)
         {
-            record = new(wobj.Write);
-            memory.Add(wobj, record);
-            var prevAddr = bw.BaseStream.Position;
-            wobj.Write(bw); // ctr(bw)
-            record.Size = bw.BaseStream.Position - prevAddr;
+            if(record == null)
+            {
+                record = new(wobj.Write);
+                memory.Add(wobj, record);
+                var prevPosition = bw.BaseStream.Position;
+                wobj.Write(bw);
+                record.Size = bw.BaseStream.Position - prevPosition;
+            }
+            else
+                wobj.Write(bw);
         }
         else //if(Mode == MemoryMode.Writing)
         {
             if(record == null)
                 throw new Exception("The object must be allocated at the previous stage");
-            wobj.Write(bw); // ctr(bw)
+            wobj.Write(bw);
         }
     }
     public static int Allocate(int offset, Writable? wobj)
@@ -87,12 +89,12 @@ static class Memory
                 bw.Write(item);
         });
     }
-    public static int AllocateArray2(int offset, Writable?[]? array, /*HACK*/int? baseAddrOffset = null)
+    public static int AllocateArray2(int offset, Writable?[]? array, int? baseAddr = null)
     {
         if(array == null) return 0;
         return Allocate(offset, array, bw =>
         {
-            int addr = (int)bw.BaseStream.Position - (baseAddrOffset ?? 0);
+            int addr = baseAddr ?? (int)bw.BaseStream.Position;
             bw.Write
             (
                 array.Select(item => Allocate(addr, item))
@@ -107,14 +109,13 @@ static class Memory
         if(Mode == MemoryMode.SizeEstimation)
         {
             if(record == null)
-            using (var ms = new MemoryStream())
-            using (var bw = new BinaryWriter(ms))
             {
                 record = new(ctr);
                 memory.Add(obj, record);
-                ctr(bw);
-                //Debug.Assert(ms.Length != 0);
-                record.Size = ms.Length;
+                var prevPosition = bw.BaseStream.Position;
+                record.Write(bw);
+                record.Size = bw.BaseStream.Position - prevPosition;
+                //Debug.Assert(record.Size != 0);
             }
             record.Allocate = true;
             return 0;
@@ -123,9 +124,17 @@ static class Memory
         {
             if(record == null)
                 throw new Exception("The object must be allocated at the previous stage");
+            if(record.Allocate)
+            {
+                record.Allocate = false;
+                var prevPosition = bw.BaseStream.Position;
+                bw.BaseStream.Position = record.Addr;
+                record.Write(bw);
+                bw.BaseStream.Position = prevPosition;
+            }
+            //Debug.Assert(record.Addr != -1);
+            return (int)record.Addr - offset;
         }
-        //Debug.Assert(record.Addr != -1);
-        return (int)record.Addr - offset;
     }
     public static uint SizeOf(object obj)
     {
@@ -139,22 +148,26 @@ static class Memory
             return (uint)record.Size;
         }
     }
-    public static void Write(BinaryWriter bw)
+    static BinaryWriter bw; //HACK:
+    public static byte[] Process(Action<BinaryWriter> ctr)
     {
-        long addr = 0;
-        foreach(var record in memory.Values)
-        if(record.Allocate)
+        
+        using (var ms = new MemoryStream())
+        using (bw = new BinaryWriter(ms))
         {
-            record.Addr = addr;
-            addr += record.Size;
+            Mode = MemoryMode.SizeEstimation;
+            ctr(bw);
+            long addr = 0;
+            foreach(var record in memory.Values)
+            if(record.Allocate)
+            {
+                record.Addr = addr;
+                addr += record.Size;
+            }
+            Mode = MemoryMode.Writing;
+            ctr(bw);
+            return ms.ToArray();
         }
-        Mode = MemoryMode.Writing;
-        foreach(var record in memory.Values)
-        if(record.Allocate)
-        {
-            record.Write(bw);
-        }
-        Mode = MemoryMode.SizeEstimation;
     }
 }
 
@@ -534,8 +547,7 @@ class EventResource: Resource
         int mEventFrameOffset;
         int mNameOffset;
 
-        int c() => (int)bw.BaseStream.Position;
-        bw.Write(mEventOffsetArrayOffset = Memory.AllocateArray2(baseAddr, mEventArray, c() - baseAddr));
+        bw.Write(mEventOffsetArrayOffset = Memory.AllocateArray2(baseAddr, mEventArray, baseAddr));
         bw.Write(mEventDataOffset = Memory.Allocate(baseAddr, mEventData));
         bw.Write(mEventNameHashOffset = Memory.Allocate(baseAddr, mEventNameHash));
         bw.Write(mEventFrameOffset = Memory.Allocate(baseAddr, mEventFrame));
