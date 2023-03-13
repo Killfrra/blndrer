@@ -21,6 +21,15 @@ void WriteBLND(BlendFile file, string path)
 }
 
 var f1 = ReadBLND("Jinx.blnd");
+//f1.Pool.mBlendDataAry = null;
+//f1.Pool.mTransitionData = null;
+//f1.Pool.mBlendTrackAry = null;
+//f1.Pool.mClassAry = null;
+//f1.Pool.mMaskDataAry = null;
+//f1.Pool.mEventDataAry = null;
+//f1.Pool.mAnimDataAry = null;
+//f1.Pool.mAnimNames = null;
+
 WriteJSON(f1, "Jinx.blnd.json");
 WriteBLND(f1, "Jinx.2.blnd");
 var f2 = ReadBLND("Jinx.2.blnd");
@@ -337,14 +346,14 @@ class PoolData : Resource
     public bool mUseCascadeBlend;
     public float mCascadeBlendValue;
     
-    public BlendData[] mBlendDataAry;
-    public TransitionClipData[] mTransitionData;
-    public TrackResource[] mBlendTrackAry;
-    public ClipResource[] mClassAry;
-    public MaskResource[] mMaskDataAry;
-    public EventResource[] mEventDataAry;
-    public AnimResourceBase?[] mAnimDataAry;
-    public PathRecord[] mAnimNames;
+    public BlendData[]? mBlendDataAry;
+    public TransitionClipData[]? mTransitionData;
+    public TrackResource[]? mBlendTrackAry;
+    public ClipResource[]? mClassAry;
+    public MaskResource[]? mMaskDataAry;
+    public EventResource[]? mEventDataAry;
+    public AnimResourceBase?[]? mAnimDataAry;
+    public PathRecord[]? mAnimNames;
     public PathRecord mSkeleton;
 
     private uint[] mExtBuffer;
@@ -399,13 +408,13 @@ class PoolData : Resource
         bw.Write(Memory.SizeOf(this));
         bw.Write(mFormatToken);
         bw.Write(mVersion);
-        bw.Write(mClassAry.Length);
-        bw.Write(mBlendDataAry.Length);
-        bw.Write(mTransitionData.Length);
-        bw.Write(mBlendTrackAry.Length);
-        bw.Write(mAnimDataAry.Length);
-        bw.Write(mMaskDataAry.Length);
-        bw.Write(mEventDataAry.Length);
+        bw.Write(mClassAry?.Length ?? 0);
+        bw.Write(mBlendDataAry?.Length ?? 0);
+        bw.Write(mTransitionData?.Length ?? 0);
+        bw.Write(mBlendTrackAry?.Length ?? 0);
+        bw.Write(mAnimDataAry?.Length ?? 0);
+        bw.Write(mMaskDataAry?.Length ?? 0);
+        bw.Write(mEventDataAry?.Length ?? 0);
         bw.Write(Convert.ToUInt32(mUseCascadeBlend));
         bw.Write(mCascadeBlendValue);
 
@@ -429,7 +438,7 @@ class PoolData : Resource
         bw.Write(mEventDataAryAddr = Memory.AllocateArray2(c(), mEventDataAry));
         bw.Write(mAnimDataAryAddr = Memory.AllocateArray2(c(), mAnimDataAry));
 
-        bw.Write(mAnimNameCount = mAnimNames.Length);
+        bw.Write(mAnimNameCount = mAnimNames?.Length ?? 0);
         bw.Write(mAnimNamesOffset = Memory.AllocateArray(c(), mAnimNames));
         
         bw.Write(mSkeleton);
@@ -577,7 +586,8 @@ class BaseEventData : Resource
     public override void Write(BinaryWriter bw)
     {
         int baseAddr = (int)bw.BaseStream.Position;
-        bw.Write(Memory.SizeOf(this));
+        //bw.Write(Memory.SizeOf(this));
+        bw.Write(0u);
         bw.Write(mEventTypeId);
         bw.Write(mFlags);
         bw.Write(mFrame);
@@ -770,16 +780,6 @@ class BlendData : Writable
         bw.Write(mBlendTime);
     }
 };
-
-class RelativeArray<T>
-{
-    public uint mOffsetFromSelf;
-}
-
-class Offset<T>
-{
-    public uint mValue;
-}
 
 class TransitionClipData : Writable
 {
