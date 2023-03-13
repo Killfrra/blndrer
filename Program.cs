@@ -31,9 +31,9 @@ var f1 = ReadBLND("Jinx.blnd");
 //f1.Pool.mAnimNames = null;
 
 WriteJSON(f1, "Jinx.blnd.json");
-WriteBLND(f1, "Jinx.2.blnd");
-var f2 = ReadBLND("Jinx.2.blnd");
-WriteJSON(f2, "Jinx.2.blnd.json");
+//WriteBLND(f1, "Jinx.2.blnd");
+//var f2 = ReadBLND("Jinx.2.blnd");
+//WriteJSON(f2, "Jinx.2.blnd.json");
 
 static class Memory
 {
@@ -389,16 +389,16 @@ class PoolData : Resource
         };
         ReadExtraBytes();
 
-        mBlendDataAry = br.ReadArr(mBlendDataAryAddr, mNumBlends, br => new BlendData(br));
-        mTransitionData = br.ReadArr(mTransitionDataOffset, mNumTransitionData, br => new TransitionClipData(br));
-        mBlendTrackAry = br.ReadArr(mBlendTrackAryAddr, mNumTracks, br => new TrackResource(br));
+        if(mBlendDataAryAddr != 0) mBlendDataAry = br.ReadArr(mBlendDataAryAddr, mNumBlends, br => new BlendData(br));
+        if(mTransitionDataOffset != 0) mTransitionData = br.ReadArr(mTransitionDataOffset, mNumTransitionData, br => new TransitionClipData(br));
+        if(mBlendTrackAryAddr != 0) mBlendTrackAry = br.ReadArr(mBlendTrackAryAddr, mNumTracks, br => new TrackResource(br));
 
-        mClassAry = br.ReadArr2(mClassAryAddr, mNumClasses, br => new ClipResource(br));
-        mMaskDataAry = br.ReadArr2(mMaskDataAryAddr, mNumMaskData, br => new MaskResource(br));
-        mEventDataAry = br.ReadArr2(mEventDataAryAddr, mNumEventData, br => new EventResource(br));
-        mAnimDataAry = br.ReadArr2(mAnimDataAryAddr, mNumAnimData, br => new AnimResourceBase(br));
+        if(mClassAryAddr != 0) mClassAry = br.ReadArr2(mClassAryAddr, mNumClasses, br => new ClipResource(br));
+        if(mMaskDataAryAddr != 0) mMaskDataAry = br.ReadArr2(mMaskDataAryAddr, mNumMaskData, br => new MaskResource(br));
+        if(mEventDataAryAddr != 0) mEventDataAry = br.ReadArr2(mEventDataAryAddr, mNumEventData, br => new EventResource(br));
+        if(mAnimDataAryAddr != 0) mAnimDataAry = br.ReadArr2(mAnimDataAryAddr, mNumAnimData, br => new AnimResourceBase(br));
         
-        mAnimNames = br.ReadArr(mAnimNamesOffset, mAnimNameCount, br => new PathRecord(br));
+        if(mAnimNamesOffset != 0) mAnimNames = br.ReadArr(mAnimNamesOffset, mAnimNameCount, br => new PathRecord(br));
     }
 
     public override void Write(BinaryWriter bw)
@@ -526,15 +526,15 @@ class EventResource: Resource
         ReadExtraBytes();
 
         long prevPosition = br.BaseStream.Position;
-        mEventArray = br.ReadArr2(mEventOffsetArrayOffset, mNumEvents, br => new BaseEventData(br), baseAddr);
+        if(mEventOffsetArrayOffset != 0) mEventArray = br.ReadArr2(mEventOffsetArrayOffset, mNumEvents, br => new BaseEventData(br), baseAddr);
         br.BaseStream.Position = mEventDataOffset;
-        mEventData = new BaseEventData(br);
+        if(mEventDataOffset != 0) mEventData = new BaseEventData(br);
         br.BaseStream.Position = mEventNameHashOffset;
-        mEventNameHash = new EventNameHash(br);
+        if(mEventNameHashOffset != 0) mEventNameHash = new EventNameHash(br);
         br.BaseStream.Position = mEventFrameOffset;
-        mEventFrame = new EventFrame(br);
+        if(mEventFrameOffset != 0) mEventFrame = new EventFrame(br);
         br.BaseStream.Position = mNameOffset;
-        mName = br.ReadCString();
+        if(mNameOffset != 0) mName = br.ReadCString();
         br.BaseStream.Position = prevPosition;
     }
     public override void Write(BinaryWriter bw)
@@ -580,7 +580,7 @@ class BaseEventData : Resource
 
         long prevPosition = br.BaseStream.Position;
         br.BaseStream.Position = mNameOffset;
-        mName = br.ReadCString();
+        if(mNameOffset != 0) mName = br.ReadCString();
         br.BaseStream.Position = prevPosition;
     }
     public override void Write(BinaryWriter bw)
@@ -605,7 +605,7 @@ class PathRecord : Writable
 
         long prevPosition = br.BaseStream.Position;
         br.BaseStream.Position = pathOffset;
-        path = br.ReadCString();
+        if(pathOffset != 0) path = br.ReadCString();
         br.BaseStream.Position = prevPosition;
     }
 
@@ -679,11 +679,11 @@ class MaskResource : Resource
 
         long prevPosition = br.BaseStream.Position;
         br.BaseStream.Position = mWeightOffset;
-        mWeight = br.ReadSingle();
+        if(mWeightOffset != 0) mWeight = br.ReadSingle();
         br.BaseStream.Position = mJointHashOffset;
-        mJointHash = new JointHash(br);
+        if(mJointHashOffset != 0) mJointHash = new JointHash(br);
         br.BaseStream.Position = mJointNdxOffset;
-        mJointNdx = new JointNdx(br);
+        if(mJointNdxOffset != 0) mJointNdx = new JointNdx(br);
         br.BaseStream.Position = prevPosition;
     }
 
@@ -704,60 +704,6 @@ class MaskResource : Resource
             bw.Write(ui);
     }
 };
-
-class ClipResource: Resource
-{
-    public Flags mFlags;
-    public enum Flags
-    {
-        eNone_0 = 0x0,
-        eMain = 0x1,
-        eLoop = 0x2,
-        eContinue = 0x4,
-        ePlayOnce = 0x8,
-    }
-    public uint mUniqueID;
-    public string mName;
-    public ClipData mClipData;
-    public ClipResource(BinaryReader br): base(br)
-    {
-        mFlags = (Flags)br.ReadUInt32(); //TODO: Verify (u16)
-        mUniqueID = br.ReadUInt32();
-        long mNameOffset = br.ReadInt32();
-        long mClipDataOffset = br.ReadInt32();
-        ReadExtraBytes();
-
-        long prevPosition = br.BaseStream.Position;
-        br.BaseStream.Position = baseAddr + mNameOffset;
-        mName = br.ReadCString();
-        br.BaseStream.Position = baseAddr + mClipDataOffset;
-        mClipData = new ClipData(br);
-        br.BaseStream.Position = prevPosition;
-    }
-
-    public override void Write(BinaryWriter bw)
-    {
-        int baseAddr = (int)bw.BaseStream.Position;
-        bw.Write(Memory.SizeOf(this));
-        bw.Write((uint)mFlags);
-        bw.Write(mUniqueID);
-        bw.Write(Memory.Allocate(baseAddr, mName));
-        bw.Write(Memory.Allocate(baseAddr, mClipData));
-    }
-}
-
-class ClipData : Writable
-{
-    public uint mClipTypeID;
-    public ClipData(BinaryReader br)
-    {
-        mClipTypeID = br.ReadUInt32();
-    }
-    public override void Write(BinaryWriter bw)
-    {
-        bw.Write(mClipTypeID);
-    }
-}
 
 class BlendData : Writable
 {
