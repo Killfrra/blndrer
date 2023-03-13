@@ -17,18 +17,18 @@ void WriteJSON(BlendFile file, string path)
 }
 void WriteBLND(BlendFile file, string path)
 {
-    File.WriteAllBytes(path, Memory.Process(bw => file.Write(bw)));
+    File.WriteAllBytes(path, Memory.Process(bw => Memory.Allocate(0, file)));
 }
 
 var f1 = ReadBLND("Jinx.blnd");
-//WriteJSON(f1, "Jinx.blnd.json");
+WriteJSON(f1, "Jinx.blnd.json");
 WriteBLND(f1, "Jinx.2.blnd");
 var f2 = ReadBLND("Jinx.2.blnd");
 WriteJSON(f2, "Jinx.2.blnd.json");
 
 static class Memory
 {
-    private static MemoryMode Mode = MemoryMode.SizeEstimation;
+    private static MemoryMode Mode;
     private enum MemoryMode
     {
         SizeEstimation,
@@ -39,11 +39,6 @@ static class Memory
     {
         public long Addr = -1, Size = -1;
         public bool Allocate = false;
-        public Action<BinaryWriter> Write;
-        public Record(Action<BinaryWriter> write)
-        {
-            Write = write;
-        }
     }
     public static void Write(BinaryWriter bw, Writable? wobj)
     {
@@ -54,7 +49,7 @@ static class Memory
         {
             if(record == null)
             {
-                record = new(wobj.Write);
+                record = new();
                 memory.Add(wobj, record);
                 var prevPosition = bw.BaseStream.Position;
                 wobj.Write(bw);
@@ -110,12 +105,13 @@ static class Memory
         {
             if(record == null)
             {
-                record = new(ctr);
+                record = new();
                 memory.Add(obj, record);
                 var prevPosition = bw.BaseStream.Position;
-                record.Write(bw);
+                ctr(bw);
                 record.Size = bw.BaseStream.Position - prevPosition;
                 //Debug.Assert(record.Size != 0);
+                bw.BaseStream.Position = prevPosition;
             }
             record.Allocate = true;
             return 0;
@@ -129,7 +125,7 @@ static class Memory
                 record.Allocate = false;
                 var prevPosition = bw.BaseStream.Position;
                 bw.BaseStream.Position = record.Addr;
-                record.Write(bw);
+                ctr(bw);
                 bw.BaseStream.Position = prevPosition;
             }
             //Debug.Assert(record.Addr != -1);
@@ -165,6 +161,7 @@ static class Memory
                 addr += record.Size;
             }
             Mode = MemoryMode.Writing;
+            bw.BaseStream.Position = 0;
             ctr(bw);
             return ms.ToArray();
         }
