@@ -329,14 +329,14 @@ class Resource : Writable
         baseAddr = br.BaseStream.Position;
         mResourceSize = br.ReadUInt32();
     }
+    /*
     protected void ReadExtraBytes()
     {
-        /*
         if(mResourceSize == 0) return;
         long readed = br.BaseStream.Position - 1 - baseAddr;
         ExtraBytes = br.ReadBytes((int)(mResourceSize - readed));
-        */
     }
+    */
 }
 
 class PoolData : Resource
@@ -387,7 +387,7 @@ class PoolData : Resource
         {
             br.ReadUInt32(),
         };
-        ReadExtraBytes();
+        //ReadExtraBytes();
 
         if(mBlendDataAryAddr != 0) mBlendDataAry = br.ReadArr(mBlendDataAryAddr, mNumBlends, br => new BlendData(br));
         if(mTransitionDataOffset != 0) mTransitionData = br.ReadArr(mTransitionDataOffset, mNumTransitionData, br => new TransitionClipData(br));
@@ -396,7 +396,7 @@ class PoolData : Resource
         if(mClassAryAddr != 0) mClassAry = br.ReadArr2(mClassAryAddr, mNumClasses, br => new ClipResource(br));
         if(mMaskDataAryAddr != 0) mMaskDataAry = br.ReadArr2(mMaskDataAryAddr, mNumMaskData, br => new MaskResource(br));
         if(mEventDataAryAddr != 0) mEventDataAry = br.ReadArr2(mEventDataAryAddr, mNumEventData, br => new EventResource(br));
-        if(mAnimDataAryAddr != 0) mAnimDataAry = br.ReadArr2(mAnimDataAryAddr, mNumAnimData, br => new AnimResourceBase(br));
+        if(mAnimDataAryAddr != 0) mAnimDataAry = br.ReadArr2(mAnimDataAryAddr, mNumAnimData, br => AnimResourceBase.Read(br));
         
         if(mAnimNamesOffset != 0) mAnimNames = br.ReadArr(mAnimNamesOffset, mAnimNameCount, br => new PathRecord(br));
     }
@@ -445,153 +445,6 @@ class PoolData : Resource
         
         foreach(uint ui in mExtBuffer)
             bw.Write(ui);
-    }
-}
-
-class AnimResourceBase : Resource
-{
-    public uint formatToken;
-    public AnimResourceBase(BinaryReader br): base(br)
-    {
-        formatToken = br.ReadUInt32();
-        ReadExtraBytes();
-    }
-    public override void Write(BinaryWriter bw)
-    {
-        bw.Write(Memory.SizeOf(this));
-        bw.Write(formatToken);
-    }
-};
-
-class EventResource: Resource
-{
-    public uint mFormatToken;
-    public uint mVersion;
-    public ushort mFlags;
-    public uint mUniqueID;
-    public BaseEventData[] mEventArray;
-    public BaseEventData mEventData;
-    public EventNameHash mEventNameHash;
-    public class EventNameHash : Writable
-    {
-        public uint mDataID;
-        public uint mNameHash;
-        public EventNameHash(BinaryReader br)
-        {
-            mDataID = br.ReadUInt32();
-            mNameHash = br.ReadUInt32();
-        }
-        public override void Write(BinaryWriter bw)
-        {
-            bw.Write(mDataID);
-            bw.Write(mNameHash);
-        }
-    }
-    public EventFrame mEventFrame;
-    public class EventFrame : Writable
-    {
-        public uint mDataID;
-        public float mFrame;
-        public EventFrame(BinaryReader br)
-        {
-            mDataID = br.ReadUInt32();
-            mFrame = br.ReadSingle();
-        }
-        public override void Write(BinaryWriter bw)
-        {
-            bw.Write(mDataID);
-            bw.Write(mFrame);
-        }
-    }
-    public string mName;
-    private uint[] mExtBuffer;
-    public EventResource(BinaryReader br): base(br)
-    {
-        mFormatToken = br.ReadUInt32();
-        mVersion = br.ReadUInt32();
-        mFlags = br.ReadUInt16();
-        ushort mNumEvents = br.ReadUInt16();
-        mUniqueID = br.ReadUInt32();
-        long mEventOffsetArrayOffset = br.ReadAddr(baseAddr);
-        long mEventDataOffset = br.ReadAddr(baseAddr);
-        long mEventNameHashOffset = br.ReadAddr(baseAddr);
-        long mEventFrameOffset = br.ReadAddr(baseAddr);
-        long mNameOffset = br.ReadAddr(baseAddr);
-
-        mExtBuffer = new uint[]
-        {
-            br.ReadUInt32(),
-            br.ReadUInt32(),
-        };
-        ReadExtraBytes();
-
-        long prevPosition = br.BaseStream.Position;
-        if(mEventOffsetArrayOffset != 0) mEventArray = br.ReadArr2(mEventOffsetArrayOffset, mNumEvents, br => new BaseEventData(br), baseAddr);
-        br.BaseStream.Position = mEventDataOffset;
-        if(mEventDataOffset != 0) mEventData = new BaseEventData(br);
-        br.BaseStream.Position = mEventNameHashOffset;
-        if(mEventNameHashOffset != 0) mEventNameHash = new EventNameHash(br);
-        br.BaseStream.Position = mEventFrameOffset;
-        if(mEventFrameOffset != 0) mEventFrame = new EventFrame(br);
-        br.BaseStream.Position = mNameOffset;
-        if(mNameOffset != 0) mName = br.ReadCString();
-        br.BaseStream.Position = prevPosition;
-    }
-    public override void Write(BinaryWriter bw)
-    {
-        int baseAddr = (int)bw.BaseStream.Position;
-        bw.Write(Memory.SizeOf(this));
-        bw.Write(mFormatToken);
-        bw.Write(mVersion);
-        bw.Write((ushort)mFlags);
-        bw.Write((ushort)mEventArray.Length);
-        bw.Write(mUniqueID);
-
-        int mEventOffsetArrayOffset;
-        int mEventDataOffset;
-        int mEventNameHashOffset;
-        int mEventFrameOffset;
-        int mNameOffset;
-
-        bw.Write(mEventOffsetArrayOffset = Memory.AllocateArray2(baseAddr, mEventArray, baseAddr));
-        bw.Write(mEventDataOffset = Memory.Allocate(baseAddr, mEventData));
-        bw.Write(mEventNameHashOffset = Memory.Allocate(baseAddr, mEventNameHash));
-        bw.Write(mEventFrameOffset = Memory.Allocate(baseAddr, mEventFrame));
-        bw.Write(mNameOffset = Memory.Allocate(baseAddr, mName));
-
-        foreach(uint ui in mExtBuffer)
-            bw.Write(ui);
-    }
-}
-
-class BaseEventData : Resource
-{
-    public uint mEventTypeId;
-    public uint mFlags;
-    public float mFrame;
-    public string mName;
-    public BaseEventData(BinaryReader br): base(br)
-    {
-        mEventTypeId = br.ReadUInt32();
-        mFlags = br.ReadUInt32();
-        mFrame = br.ReadSingle();
-        long mNameOffset = br.ReadAddr(baseAddr);
-        ReadExtraBytes();
-
-        long prevPosition = br.BaseStream.Position;
-        br.BaseStream.Position = mNameOffset;
-        if(mNameOffset != 0) mName = br.ReadCString();
-        br.BaseStream.Position = prevPosition;
-    }
-    public override void Write(BinaryWriter bw)
-    {
-        int baseAddr = (int)bw.BaseStream.Position;
-        //bw.Write(Memory.SizeOf(this));
-        bw.Write(0u);
-        bw.Write(mEventTypeId);
-        bw.Write(mFlags);
-        bw.Write(mFrame);
-        bw.Write(Memory.Allocate(baseAddr, mName));
     }
 }
 
@@ -675,7 +528,7 @@ class MaskResource : Resource
             br.ReadUInt32(),
             br.ReadUInt32(),
         };
-        ReadExtraBytes();
+        //ReadExtraBytes();
 
         long prevPosition = br.BaseStream.Position;
         br.BaseStream.Position = mWeightOffset;
@@ -766,7 +619,7 @@ class TrackResource: Resource
         mBlendMode = br.ReadUInt32();
         mIndex = br.ReadUInt32();
         mName = br.ReadCString(32);
-        ReadExtraBytes();
+        //ReadExtraBytes();
     }
     public override void Write(BinaryWriter bw)
     {
