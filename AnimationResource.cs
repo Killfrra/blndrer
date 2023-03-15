@@ -10,7 +10,8 @@ class AnimResourceBase : Resource
         long prevPosition = br.BaseStream.Position;
         uint formatToken = br.ReadUInt32();
         br.BaseStream.Position = prevPosition;
-        return new AnimationResource(br);
+        //return new AnimationResource(br);
+        return new AnimResourceBase(br);
     }
     public override void Write(BinaryWriter bw)
     {

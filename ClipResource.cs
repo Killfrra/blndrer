@@ -1,4 +1,6 @@
 
+using System.Diagnostics;
+
 class ClipResource: Resource
 {
     public Flags mFlags;
@@ -13,19 +15,19 @@ class ClipResource: Resource
     public uint mUniqueID;
     public string mName;
     public ClipData mClipData;
-    public ClipResource(BinaryReader br): base(br)
+    public ClipResource(BinaryReader br, PoolData pool): base(br)
     {
         mFlags = (Flags)br.ReadUInt32(); //TODO: Verify (u16)
         mUniqueID = br.ReadUInt32();
-        long mNameOffset = br.ReadInt32();
-        long mClipDataOffset = br.ReadInt32();
+        long mNameOffset = br.ReadAddr(baseAddr);
+        long mClipDataOffset = br.ReadAddr(baseAddr);
         //ReadExtraBytes();
 
         long prevPosition = br.BaseStream.Position;
-        br.BaseStream.Position = baseAddr + mNameOffset;
-        mName = br.ReadCString();
-        br.BaseStream.Position = baseAddr + mClipDataOffset;
-        mClipData = ClipData.Read(br);
+        br.BaseStream.Position = mNameOffset;
+        if(mNameOffset != 0) mName = br.ReadCString();
+        br.BaseStream.Position = mClipDataOffset;
+        if(mClipDataOffset != 0) mClipData = ClipData.Read(br, pool);
         br.BaseStream.Position = prevPosition;
     }
 
@@ -61,14 +63,14 @@ class ClipData : Writable
         baseAddr = br.BaseStream.Position;
         mClipTypeID = (ClipTypes)br.ReadUInt32();
     }
-    public static ClipData Read(BinaryReader br)
+    public static ClipData Read(BinaryReader br, PoolData pool)
     {
         var prevPosition = br.BaseStream.Position;
         ClipTypes mClipTypeID = (ClipTypes)br.ReadUInt32();
         br.BaseStream.Position = prevPosition;
         if(mClipTypeID == ClipTypes.eAtomic)
         {
-            return new AtomicClip(br);
+            return new AtomicClip(br, pool);
         }
         else if(mClipTypeID == ClipTypes.eSelector)
         {
@@ -111,31 +113,34 @@ class ClipData : Writable
 
 class AtomicClip : ClipData
 {
+    private PoolData pool;
+
     public uint mStartTick;
     public uint mEndTick;
     public float mTickDuration;
-    public AnimResourceBase mAnimData;
-    public uint mAnimDataIndex;
-    public EventResource mEventData;
-    public MaskResource mMaskData;
-    public TrackResource mTrackData;
-    public UpdaterResource mUpdaterData;
-    public string mSyncGroupName;
+    public int mAnimDataIndex;
+    //public AnimResourceBase? mAnimData;
+    public EventResource? mEventData;
+    public MaskResource? mMaskData;
+    public TrackResource? mTrackData;
+    public UpdaterResource? mUpdaterData;
+    public string? mSyncGroupName;
     public uint mSyncGroup;
     public uint[] mExtBuffer;
 
-    public AtomicClip(BinaryReader br): base(br)
+    public AtomicClip(BinaryReader br, PoolData pool): base(br)
     {
+        this.pool = pool;
+        
         mStartTick = br.ReadUInt32();
         mEndTick = br.ReadUInt32();
         mTickDuration = br.ReadSingle();
-        long mAnimDataAddr = br.ReadAddr(baseAddr);
-        mAnimDataIndex = br.ReadUInt32();
-        long mEventDataAddr = br.ReadAddr(baseAddr);
-        long mMaskDataAddr = br.ReadAddr(baseAddr);
-        long mTrackDataAddr = br.ReadAddr(baseAddr);
-        long mUpdaterDataOffset = br.ReadAddr(baseAddr);
-        long mSyncGroupNameOffset = br.ReadAddr(baseAddr);
+        mAnimDataIndex = br.ReadInt32();
+        long mEventDataAddr = br.ReadAddr();
+        long mMaskDataAddr = br.ReadAddr();
+        long mTrackDataAddr = br.ReadAddr();
+        long mUpdaterDataOffset = br.ReadAddr();
+        long mSyncGroupNameOffset = br.ReadAddr();
         mSyncGroup = br.ReadUInt32();
         mExtBuffer = new uint[]
         {
@@ -144,19 +149,28 @@ class AtomicClip : ClipData
         };
 
         var prevPosition = br.BaseStream.Position;
-        br.BaseStream.Position = mAnimDataAddr;
+        //br.BaseStream.Position = mAnimDataAddr;
         //if(mAnimDataAddr != 0) mAnimData = AnimResourceBase.Read(br);
+        //if(mAnimDataIndex != -1) mAnimData = pool.mAnimDataAry[mAnimDataIndex];
         br.BaseStream.Position = mEventDataAddr;
-        //if(mEventDataAddr != 0) mEventData = new EventResource(br);
+        if(mEventDataAddr != 0) mEventData = new EventResource(br);
         br.BaseStream.Position = mMaskDataAddr;
-        //if(mMaskDataAddr != 0) mMaskData = new MaskResource(br);
+        if(mMaskDataAddr != 0) mMaskData = new MaskResource(br);
         br.BaseStream.Position = mTrackDataAddr;
-        //if(mTrackDataAddr != 0) mTrackData = new TrackResource(br);
+        if(mTrackDataAddr != 0) mTrackData = new TrackResource(br);
         br.BaseStream.Position = mUpdaterDataOffset;
-        //if(mUpdaterDataOffset != 0) mUpdaterData = new UpdaterResource(br);
+        if(mUpdaterDataOffset != 0) mUpdaterData = new UpdaterResource(br);
         br.BaseStream.Position = mSyncGroupNameOffset;
-        //if(mSyncGroupNameOffset != 0) mSyncGroupName = br.ReadCString();
+        if(mSyncGroupNameOffset != 0) mSyncGroupName = br.ReadCString();
         br.BaseStream.Position = prevPosition;
+    }
+
+    public override void Write(BinaryWriter bw)
+    {
+        //Debug.Assert(mAnimData == null || (pool.mAnimDataAry?.Contains(mAnimData) ?? false));
+        Debug.Assert(mEventData == null || (pool.mEventDataAry?.Contains(mEventData) ?? false));
+        Debug.Assert(mMaskData == null || (pool.mMaskDataAry?.Contains(mMaskData) ?? false));
+        Debug.Assert(mTrackData == null || (pool.mBlendTrackAry?.Contains(mTrackData) ?? false));
     }
 };
 
