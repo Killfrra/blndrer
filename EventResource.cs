@@ -65,9 +65,9 @@ class EventResource: Resource
         br.BaseStream.Position = mEventDataOffset;
         if(mEventDataOffset != 0) mEventData = BaseEventData.Read(br);
         br.BaseStream.Position = mEventNameHashOffset;
-        if(mEventNameHashOffset != 0) mEventNameHash = new EventNameHash(br);
+        if(mEventNameHashOffset != 0) mEventNameHash = br.Read<EventNameHash>();
         br.BaseStream.Position = mEventFrameOffset;
-        if(mEventFrameOffset != 0) mEventFrame = new EventFrame(br);
+        if(mEventFrameOffset != 0) mEventFrame = br.Read<EventFrame>();
         br.BaseStream.Position = mNameOffset;
         if(mNameOffset != 0) mName = br.ReadCString();
         br.BaseStream.Position = prevPosition;
@@ -135,19 +135,19 @@ class BaseEventData : Resource
         br.BaseStream.Position = prevPosition;
 
         if(mEventTypeId == EventType.SoundEventData)
-            return new SoundEventData(br);
+            return br.Read<SoundEventData>();
         if(mEventTypeId == EventType.ParticleEventData)
-            return new ParticleEventData(br);
+            return br.Read<ParticleEventData>();
         if(mEventTypeId == EventType.SubmeshVisibilityEventData)
-            return new SubmeshVisibilityEventData(br);
+            return br.Read<SubmeshVisibilityEventData>();
         if(mEventTypeId == EventType.FadeEventData)
-            return new FadeEventData(br);
+            return br.Read<FadeEventData>();
         if(mEventTypeId == EventType.JointSnapEventData)
-            return new JointSnapEventData(br);
+            return br.Read<JointSnapEventData>();
         if(mEventTypeId == EventType.EnableLookAtEventData)
-            return new EnableLookAtEventData(br);
+            return br.Read<EnableLookAtEventData>();
         else
-            //return new BaseEventData(br);
+            //return br.Read<BaseEventData>();
             throw new Exception("Invalid event type");
     }
     public override void Write(BinaryWriter bw)
@@ -173,6 +173,13 @@ internal class JointSnapEventData : BaseEventData
         mJointToOverrideIdx = br.ReadUInt16();
         mJointToSnapToIdx = br.ReadUInt16();
     }
+    public override void Write(BinaryWriter bw)
+    {
+        base.Write(bw);
+        bw.Write(mEndFrame);
+        bw.Write(mJointToOverrideIdx);
+        bw.Write(mJointToSnapToIdx);
+    }
 }
 
 internal class FadeEventData : BaseEventData
@@ -186,6 +193,13 @@ internal class FadeEventData : BaseEventData
         mTargetAlpha = br.ReadSingle();
         mEndFrame = br.ReadSingle();
     }
+    public override void Write(BinaryWriter bw)
+    {
+        base.Write(bw);
+        bw.Write(mTimeToFade);
+        bw.Write(mTargetAlpha);
+        bw.Write(mEndFrame);
+    }
 }
 
 internal class SubmeshVisibilityEventData : BaseEventData
@@ -198,6 +212,13 @@ internal class SubmeshVisibilityEventData : BaseEventData
         mEndFrame = br.ReadSingle();
         mShowSubmeshHash = br.ReadUInt32();
         mHideSubmeshHash = br.ReadUInt32();
+    }
+    public override void Write(BinaryWriter bw)
+    {
+        base.Write(bw);
+        bw.Write(mEndFrame);
+        bw.Write(mShowSubmeshHash);
+        bw.Write(mHideSubmeshHash);
     }
 }
 
@@ -223,6 +244,17 @@ internal class ParticleEventData : BaseEventData
         if(mTargetBoneNameOffset != 0) mTargetBoneName = br.ReadCString();
         br.BaseStream.Position = prevPosition;
     }
+    public override void Write(BinaryWriter bw)
+    {
+        int baseAddr = (int)bw.BaseStream.Position;
+
+        base.Write(bw);
+        
+        bw.Write(Memory.Allocate(baseAddr, mEffectName));
+        bw.Write(Memory.Allocate(baseAddr, mBoneName));
+        bw.Write(Memory.Allocate(baseAddr, mTargetBoneName));
+        bw.Write(mEndFrame);
+    }
 }
 
 internal class SoundEventData : BaseEventData
@@ -237,6 +269,14 @@ internal class SoundEventData : BaseEventData
         if(mSoundNameOffset != 0) mSoundName = br.ReadCString();
         br.BaseStream.Position = prevPosition;
     }
+    public override void Write(BinaryWriter bw)
+    {
+        int baseAddr = (int)bw.BaseStream.Position;
+
+        base.Write(bw);
+        
+        bw.Write(Memory.Allocate(baseAddr, mSoundName));
+    }
 }
 
 class EnableLookAtEventData : BaseEventData
@@ -249,5 +289,12 @@ class EnableLookAtEventData : BaseEventData
         mEndFrame = br.ReadSingle();
         mEnableLookAt = br.ReadUInt32();
         mLockCurrentValues = br.ReadUInt32();
+    }
+    public override void Write(BinaryWriter bw)
+    {
+        base.Write(bw);
+        bw.Write(mEndFrame);
+        bw.Write(mEnableLookAt);
+        bw.Write(mLockCurrentValues);
     }
 }

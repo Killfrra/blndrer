@@ -7,7 +7,7 @@ BlendFile ReadBLND(string path)
 {
     using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read))
     using (var br = new BinaryReader(fs, Encoding.Default))
-        return new BlendFile(br);
+    return br.Read<BlendFile>();
 }
 void WriteJSON(BlendFile file, string path)
 {
@@ -29,151 +29,9 @@ var f1 = ReadBLND("Jinx.blnd");
 //f1.Pool.mAnimNames = null;
 
 WriteJSON(f1, "Jinx.blnd.json");
-//WriteBLND(f1, "Jinx.2.blnd");
-//var f2 = ReadBLND("Jinx.2.blnd");
-//WriteJSON(f2, "Jinx.2.blnd.json");
-
-static class Memory
-{
-    private static MemoryMode Mode;
-    private enum MemoryMode
-    {
-        SizeEstimation,
-        Writing
-    }
-    private static Dictionary<object, Record> memory = new();
-    private class Record
-    {
-        public long Addr = -1, Size = -1;
-        public bool Allocate = false;
-    }
-    public static void Write(BinaryWriter bw, Writable? wobj)
-    {
-        if(wobj == null) return;
-
-        var record = memory.GetValueOrDefault(wobj);
-        if(Mode == MemoryMode.SizeEstimation)
-        {
-            if(record == null)
-            {
-                record = new();
-                memory.Add(wobj, record);
-                var prevPosition = bw.BaseStream.Position;
-                wobj.Write(bw);
-                record.Size = bw.BaseStream.Position - prevPosition;
-            }
-            else
-                wobj.Write(bw);
-        }
-        else //if(Mode == MemoryMode.Writing)
-        {
-            if(record == null)
-                throw new Exception("The object must be allocated at the previous stage");
-            wobj.Write(bw);
-        }
-    }
-    public static int Allocate(int offset, Writable? wobj)
-    {
-        if(wobj == null) return 0;
-        return Allocate(offset, wobj, wobj.Write);
-    }
-    public static int Allocate(int offset, string? sobj)
-    {
-        if(sobj == null) return 0;
-        return Allocate(offset, sobj, bw => bw.WriteCString(sobj));
-    }
-    public static int AllocateArray(int offset, Writable?[]? array)
-    {
-        if(array == null) return 0;
-        return Allocate(offset, array, bw =>
-        {
-            foreach(var item in array)
-                bw.Write(item);
-        });
-    }
-    public static int AllocateArray2(int offset, Writable?[]? array, int? baseAddr = null)
-    {
-        if(array == null) return 0;
-        return Allocate(offset, array, bw =>
-        {
-            int addr = baseAddr ?? (int)bw.BaseStream.Position;
-            bw.Write
-            (
-                array.Select(item => Allocate(addr, item))
-                     .SelectMany(BitConverter.GetBytes).ToArray()
-            );
-        });
-    }
-    public static int Allocate(int offset, object? obj, Action<BinaryWriter> ctr)
-    {
-        if(obj == null) return 0;
-        var record = memory.GetValueOrDefault(obj);
-        if(Mode == MemoryMode.SizeEstimation)
-        {
-            if(record == null)
-            {
-                record = new();
-                memory.Add(obj, record);
-                var prevPosition = bw.BaseStream.Position;
-                ctr(bw);
-                record.Size = bw.BaseStream.Position - prevPosition;
-                //Debug.Assert(record.Size != 0);
-                bw.BaseStream.Position = prevPosition;
-            }
-            record.Allocate = true;
-            return 0;
-        }
-        else //if(Mode == MemoryMode.Writing)
-        {
-            if(record == null)
-                throw new Exception("The object must be allocated at the previous stage");
-            if(record.Allocate)
-            {
-                record.Allocate = false;
-                var prevPosition = bw.BaseStream.Position;
-                bw.BaseStream.Position = record.Addr;
-                ctr(bw);
-                bw.BaseStream.Position = prevPosition;
-            }
-            //Debug.Assert(record.Addr != -1);
-            return (int)record.Addr - offset;
-        }
-    }
-    public static uint SizeOf(object obj)
-    {
-        if(Mode == MemoryMode.SizeEstimation)
-            return 0;
-        else
-        {
-            var record = memory.GetValueOrDefault(obj);
-            if(record == null)
-                throw new Exception("The object must be allocated at the previous stage");
-            return (uint)record.Size;
-        }
-    }
-    static BinaryWriter bw; //HACK:
-    public static byte[] Process(Action<BinaryWriter> ctr)
-    {
-        
-        using (var ms = new MemoryStream())
-        using (bw = new BinaryWriter(ms))
-        {
-            Mode = MemoryMode.SizeEstimation;
-            ctr(bw);
-            long addr = 0;
-            foreach(var record in memory.Values)
-            if(record.Allocate)
-            {
-                record.Addr = addr;
-                addr += record.Size;
-            }
-            Mode = MemoryMode.Writing;
-            bw.BaseStream.Position = 0;
-            ctr(bw);
-            return ms.ToArray();
-        }
-    }
-}
+WriteBLND(f1, "Jinx.2.blnd");
+var f2 = ReadBLND("Jinx.2.blnd");
+WriteJSON(f2, "Jinx.2.blnd.json");
 
 static class HashFunctions
 {
@@ -186,12 +44,12 @@ static class HashFunctions
     }
 }
 
-class Writable
+abstract class Writable
 {
-    public virtual void Write(BinaryWriter bw)
-    {
-        throw new NotImplementedException();
-    }
+    public abstract void Write(BinaryWriter bw);
+    // {
+    //     throw new NotImplementedException();
+    // }
 }
 
 class BlendFile: Writable
@@ -200,99 +58,18 @@ class BlendFile: Writable
     public PoolData Pool;
     public BlendFile(BinaryReader br)
     {
-        Header = new BinaryHeader(br);
+        Header = br.Read<BinaryHeader>();
         Debug.Assert(
             Header.mEngineType == 845427570u &&
             Header.mBinaryBlockType == 1684958306u &&
             Header.mBinaryBlockVersion == 1u
         );
-        Pool = new PoolData(br);
+        Pool = br.Read<PoolData>();
     }
     public override void Write(BinaryWriter bw)
     {
         bw.Write(Header);
         bw.Write(Pool);
-    }
-}
-
-static class BinaryReaderExtensions
-{
-    public static long ReadAddr(this BinaryReader br)
-    {
-        long pos = br.BaseStream.Position;
-        return br.ReadAddr(pos); 
-    }
-
-    public static long ReadAddr(this BinaryReader br, long pos)
-    {
-        int addr = br.ReadInt32();
-        return (addr != 0) ? pos + addr : 0; 
-    }
-
-    public static T[] ReadArr<T>(this BinaryReader br, long addr, uint num, Func<BinaryReader, T> ctr)
-    {
-        var arr = new T[num];
-        br.BaseStream.Position = addr;
-        for(int i = 0; i < num; i++)
-            arr[i] = ctr(br);
-        return arr;
-    }
-
-    public static T[] ReadArr2<T>(this BinaryReader br, long addr, uint num, Func<BinaryReader, T> ctr, long? baseAddr = null)
-    {
-        //var prevPosition = br.BaseStream.Position;
-        br.BaseStream.Position = addr;
-
-        var addrs = new long[num];
-        for(int i = 0; i < num; i++)
-            addrs[i] = br.ReadAddr(baseAddr ?? addr);
-        
-        var arr = new T[num];
-        for(int i = 0; i < num; i++)
-        {
-            addr = addrs[i];
-            if(addr != 0) //TODO: throw an Exception otherwise?
-            {
-                br.BaseStream.Position = addr;
-                arr[i] = ctr(br);
-            }
-        }
-
-        //br.BaseStream.Position = prevPosition;
-        return arr;
-    }
-
-    public static string ReadCString(this BinaryReader br, int length = int.MaxValue)
-    {
-        var ret = "";
-        var prevPosition = br.BaseStream.Position;
-        for(int i = 0; i < length; i++)
-        {
-            var c = br.ReadChar();
-            if(c == '\0') break;
-            ret += c;
-        }
-        if(length != int.MaxValue)
-            br.BaseStream.Position = prevPosition + length;
-        return ret;
-    }
-
-    public static void Write(this BinaryWriter bw, Writable? wobj)
-    {
-        Memory.Write(bw, wobj);
-    }
-
-    public static void WriteCString(this BinaryWriter bw, string sobj)
-    {
-        bw.Write(Encoding.UTF8.GetBytes(sobj + '\0'));
-    }
-
-    public static void WriteCString(this BinaryWriter bw, string sobj, int length)
-    {
-        length--;
-        sobj = sobj.PadRight(length, '\0')[..length];
-        var bytes = Encoding.UTF8.GetBytes(sobj + '\0');
-        bw.Write(bytes);
     }
 }
 
@@ -315,7 +92,7 @@ class BinaryHeader : Writable
     }
 }
 
-class Resource : Writable
+abstract class Resource : Writable
 {
     protected long baseAddr;
     public uint mResourceSize;
@@ -380,23 +157,23 @@ class PoolData : Resource
         uint mAnimNameCount = br.ReadUInt32();
         long mAnimNamesOffset = br.ReadAddr();
 
-        mSkeleton = new PathRecord(br);
+        mSkeleton = br.Read<PathRecord>();
         mExtBuffer = new uint[]
         {
             br.ReadUInt32(),
         };
         //ReadExtraBytes();
 
-        if(mBlendDataAryAddr != 0) mBlendDataAry = br.ReadArr(mBlendDataAryAddr, mNumBlends, br => new BlendData(br));
-        if(mTransitionDataOffset != 0) mTransitionData = br.ReadArr(mTransitionDataOffset, mNumTransitionData, br => new TransitionClipData(br));
-        if(mBlendTrackAryAddr != 0) mBlendTrackAry = br.ReadArr(mBlendTrackAryAddr, mNumTracks, br => new TrackResource(br));
+        if(mBlendDataAryAddr != 0) mBlendDataAry = br.ReadArr(mBlendDataAryAddr, mNumBlends, br => br.Read<BlendData>());
+        if(mTransitionDataOffset != 0) mTransitionData = br.ReadArr(mTransitionDataOffset, mNumTransitionData, br => br.Read<TransitionClipData>());
+        if(mBlendTrackAryAddr != 0) mBlendTrackAry = br.ReadArr(mBlendTrackAryAddr, mNumTracks, br => br.Read<TrackResource>());
 
-        if(mMaskDataAryAddr != 0) mMaskDataAry = br.ReadArr2(mMaskDataAryAddr, mNumMaskData, br => new MaskResource(br));
-        if(mEventDataAryAddr != 0) mEventDataAry = br.ReadArr2(mEventDataAryAddr, mNumEventData, br => new EventResource(br));
+        if(mMaskDataAryAddr != 0) mMaskDataAry = br.ReadArr2(mMaskDataAryAddr, mNumMaskData, br => br.Read<MaskResource>());
+        if(mEventDataAryAddr != 0) mEventDataAry = br.ReadArr2(mEventDataAryAddr, mNumEventData, br => br.Read<EventResource>());
         if(mAnimDataAryAddr != 0) mAnimDataAry = br.ReadArr2(mAnimDataAryAddr, mNumAnimData, br => AnimResourceBase.Read(br));
-        if(mClassAryAddr != 0) mClassAry = br.ReadArr2(mClassAryAddr, mNumClasses, br => new ClipResource(br, this));
+        if(mClassAryAddr != 0) mClassAry = br.ReadArr2(mClassAryAddr, mNumClasses, br => br.Read<ClipResource>());
 
-        if(mAnimNamesOffset != 0) mAnimNames = br.ReadArr(mAnimNamesOffset, mAnimNameCount, br => new PathRecord(br));
+        if(mAnimNamesOffset != 0) mAnimNames = br.ReadArr(mAnimNamesOffset, mAnimNameCount, br => br.Read<PathRecord>());
     }
 
     public override void Write(BinaryWriter bw)
@@ -532,9 +309,9 @@ class MaskResource : Resource
         br.BaseStream.Position = mWeightOffset;
         if(mWeightOffset != 0) mWeight = br.ReadSingle();
         br.BaseStream.Position = mJointHashOffset;
-        if(mJointHashOffset != 0) mJointHash = new JointHash(br);
+        if(mJointHashOffset != 0) mJointHash = br.Read<JointHash>();
         br.BaseStream.Position = mJointNdxOffset;
-        if(mJointNdxOffset != 0) mJointNdx = new JointNdx(br);
+        if(mJointNdxOffset != 0) mJointNdx = br.Read<JointNdx>();
         br.BaseStream.Position = prevPosition;
     }
 
@@ -592,6 +369,11 @@ class TransitionClipData : Writable
             mToAnimId = br.ReadUInt32();
             mTransitionAnimId = br.ReadUInt32();
         }
+
+        public override void Write(BinaryWriter bw)
+        {
+            throw new NotImplementedException();
+        }
     }
     public TransitionClipData(BinaryReader br)
     {
@@ -601,7 +383,12 @@ class TransitionClipData : Writable
         uint mOffsetFromSelf = br.ReadUInt32();
         mTransitionToArray = new TransitionToData[mTransitionToCount];
         for(int i = 0; i < mTransitionToCount; i++)
-            mTransitionToArray[i] = new TransitionToData(br);
+            mTransitionToArray[i] = br.Read<TransitionToData>();
+    }
+
+    public override void Write(BinaryWriter bw)
+    {
+        throw new NotImplementedException();
     }
 }
 
